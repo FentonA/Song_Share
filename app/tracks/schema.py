@@ -2,18 +2,35 @@ import graphene
 from graphene_django import DjangoObjectType
 from .models import Track, Like
 from users.schema import UserType
+from graphql import GraphQLError
+from django.db.models import Q
 
 
 class TrackType(DjangoObjectType):
     class Meta:
         model = Track
 
-class Query(graphene.ObjectType):
-    tracks = graphene.List(TrackType)
+class LikeType(DjangoObjectType):
+    class Meta:
+        model = Like
 
-    def resolve_tracks(self, info):
+class Query(graphene.ObjectType):
+    tracks = graphene.List(TrackType, search = graphene.String())
+    likes = graphene.List(LikeType)
+
+    def resolve_tracks(self, info, search=None):
+        if search:
+            filter =(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(url__icontains = search) |
+                Q(posted_by__username__icontains = search)
+            )
+            return Track.objects.filter(filter)
         return Track.objects.all()
 
+    def resolve_likes(self, info):
+        return Like.objects.all()
 
 class CreateTrack(graphene.Mutation):
     track = graphene.Field(TrackType)
@@ -65,7 +82,7 @@ class DeleteTrack(graphene.Mutation):
         track = Track.objects.get(id = track_id)
 
         if track.posted_by != user:
-            raise Exception("You're not permitted to delet this track.")
+            raise Exception("You're not permitted to delete this track.")
         track.delete()
 
         return DeleteTrack(track_id=track_id)
@@ -81,19 +98,17 @@ class CreateLike(graphene.Mutation):
         user = info.context.user
         
         if user.is_anonymous:
-            raise Exception("Please log in to like a track.")
+            raise GraphQLError("Please log in to like a track.")
 
         track = Track.objects.get(id = track_id)
         if not track: 
-            raise Exception('Can\'t find track with given id')
+            raise GraphQLError('Can\'t find track with given id')
         
         Like.objects.create(
             user=user,
-            track = track
+            track=track
         )
-
         return CreateLike(user=user, track=track)
-
 class Mutation(graphene.ObjectType):
     create_track = CreateTrack.Field()
     update_track = UpdateTrack.Field()
